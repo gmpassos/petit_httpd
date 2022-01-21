@@ -72,7 +72,20 @@ $> dart pub global activate petit_httpd
 To run an HTTP Daemon:
 
 ```shell
-$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain mydomain.com
+$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt/live --domain mydomain.com
+```
+
+A BASH script will all together:
+```shell
+#!/bin/bash
+
+dart pub global activate petit_httpd
+
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+
+mkdir -p /var/log/petit_httpd
+
+petit_httpd /var/www --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt/live --domain mydomain.com -verbose  >> /var/log/petit_httpd/requests.log
 ```
 
 ## Source
