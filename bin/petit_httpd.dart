@@ -15,7 +15,7 @@ void main(List<String> _args) async {
   if (args.arguments.isEmpty) {
     print('USAGE:');
     print(
-        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com\n');
+        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com -cors\n');
     exit(0);
   }
 
@@ -24,6 +24,8 @@ void main(List<String> _args) async {
   var port = args.optionAsInt('port', 80)!;
   var securePort = args.optionAsInt('secure-port', 443)!;
   var address = args.optionAsString('address', 'localhost')!;
+
+  var cors = args.flag('cors');
 
   var letsEncrypt = args.optionAsDirectory(
       'letsencrypt-path', Directory('/etc/letsencrypt/live'));
@@ -49,6 +51,7 @@ void main(List<String> _args) async {
       port: port,
       securePort: securePort,
       bindingAddress: address,
+      setCORSHeaders: cors,
       letsEncryptDirectory: letsEncrypt,
       domains: {
         if (domain != null) domain: email!,
