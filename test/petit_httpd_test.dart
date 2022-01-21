@@ -1,7 +1,8 @@
 import 'dart:io';
 
-import 'package:petit_httpd/petit_httpd.dart';
+import 'package:mercury_client/mercury_client.dart';
 import 'package:path/path.dart' as pack_path;
+import 'package:petit_httpd/petit_httpd.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -15,6 +16,29 @@ void main() {
 
       var ok = await petitHTTPD.start();
       expect(ok, isTrue);
+
+      var httpClient = HttpClient('http://localhost:4455/');
+
+      {
+        var response = await httpClient.get('/foo');
+        print(response);
+
+        expect(response.isNotOK, isTrue);
+        expect(response.status, equals(404));
+        expect(response.getResponseHeader('cache-control'), isNull);
+      }
+
+      {
+        var response = await httpClient.get('/hello-world.txt');
+        print(response);
+
+        expect(response.isOK, isTrue);
+        expect(response.status, equals(200));
+        expect(response.getResponseHeader('cache-control'),
+            contains('must-revalidate'));
+
+        expect(response.bodyAsString, equals('Hello World!'));
+      }
     });
   });
 }
