@@ -19,7 +19,7 @@ This is a simple HTTP file server integrated with [Let's Encrypt][shelf_letsencr
 ## Motivation
 
 Since [Dart][dart_overview_platforms] can run in many native platforms (Linux/x64, macOS/x64/arm64, Windows/x86),
-it can be an awesome way to have a HTTP Server running in any place,
+it can be an awesome way to have an HTTP Server running in any place,
 including all the basic features needed today.
 
 [dart_overview_platforms]: https://dart.dev/overview#platform
@@ -56,7 +56,7 @@ void main() async {
 }
 ```
 
-## CLI Tools
+## CLI Tool
 
 ### petit_httpd
 
@@ -75,7 +75,7 @@ To run an HTTP Daemon:
 $> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt/live --domain mydomain.com
 ```
 
-A BASH script will all together:
+A BASH script with all together:
 ```shell
 #!/bin/bash
 
