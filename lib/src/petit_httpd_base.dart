@@ -96,12 +96,14 @@ class PetitHTTPD {
 
   static Response _configureHeaders(Request request, Response response,
       {Map<String, String>? headers}) {
+    headers ??= <String, String>{};
+
+    headers[HttpHeaders.serverHeader] = 'petit_httpd/$VERSION';
+
     var statusCode = response.statusCode;
     if (statusCode < 200 || statusCode > 299) {
-      return response;
+      return response.change(headers: headers);
     }
-
-    headers ??= <String, String>{};
 
     headers[HttpHeaders.cacheControlHeader] =
         'private, must-revalidate, max-age=0';
