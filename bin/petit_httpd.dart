@@ -54,6 +54,7 @@ void main(List<String> _args) async {
       print('-- Force HTTPS: $forceHttps');
       print('-- Domain: $domain > $email');
       print('-- Let\'s Encrypt directory: ${letsEncrypt?.path}');
+      print('');
     }
   }
 
