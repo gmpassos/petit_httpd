@@ -2,6 +2,7 @@
 
 - `petit_httpd` new option:
   - `-force-https`: to automatically redirect to HTTPS when possible.
+  - `-version`: just show the current CLI version. 
 
 ## 1.0.2
 

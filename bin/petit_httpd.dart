@@ -7,10 +7,17 @@ void _printLine() => print(
     '========================================================================');
 
 void main(List<String> _args) async {
-  _printLine();
-  print('[ petit_httpd / ${PetitHTTPD.VERSION} ]\n');
-
   var args = ArgsSimple.parse(_args);
+
+  var version = args.flag('version');
+
+  if (version) {
+    print('petit_httpd/${PetitHTTPD.VERSION}');
+    exit(0);
+  }
+
+  _printLine();
+  print('[ petit_httpd/${PetitHTTPD.VERSION} ]\n');
 
   if (args.arguments.isEmpty) {
     print('USAGE:');
@@ -36,7 +43,7 @@ void main(List<String> _args) async {
 
   var forceHttps = args.flag('force-https');
 
-  var verbose = args.flag('v');
+  var verbose = args.flag('verbose');
 
   if (verbose) {
     print('-- Document root: ${documentRoot.path}');
@@ -44,6 +51,7 @@ void main(List<String> _args) async {
     print('-- Secure port: $securePort');
     print('-- Binding address: $address');
     if (domain != null) {
+      print('-- Force HTTPS: $forceHttps');
       print('-- Domain: $domain > $email');
       print('-- Let\'s Encrypt directory: ${letsEncrypt?.path}');
     }

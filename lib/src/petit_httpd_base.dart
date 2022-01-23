@@ -253,7 +253,7 @@ class PetitHTTPD {
   @override
   String toString() {
     var letsEncryptInfo = isLetsEncryptEnabled
-        ? ', domains: $domains, letsEncryptDirectory: $letsEncryptDirectory'
+        ? ', redirectToHTTPS: $redirectToHTTPS, domains: $domains, letsEncryptDirectory: $letsEncryptDirectory'
         : ', letsEncrypt: disabled';
     return 'PetitHTTPD{ documentRoot: $documentRoot, port: $port, securePort: $securePort, bindingAddress: $bindingAddress$letsEncryptInfo }';
   }
