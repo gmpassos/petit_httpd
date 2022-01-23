@@ -9,7 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.0.2';
+  static const String VERSION = '1.0.3';
 
   /// The document root [Directory].
   final Directory documentRoot;
@@ -29,6 +29,11 @@ class PetitHTTPD {
   /// If `true` CORS` headers will be set for successful responses.
   final bool setCORSHeaders;
 
+  /// If [true] and a [SecureServer] is being started
+  ///
+  /// - See [isLetsEncryptEnabled].
+  final bool redirectToHTTPS;
+
   /// If `true` allows Let's Encrypt.
   final bool allowLetsEncrypt;
 
@@ -44,10 +49,12 @@ class PetitHTTPD {
       this.bindingAddress = 'localhost',
       this.setHeaderCacheControl = true,
       this.setCORSHeaders = true,
+      this.redirectToHTTPS = true,
       this.allowLetsEncrypt = true,
       this.domains,
       this.letsEncryptDirectory});
 
+  /// Returns `true` if Let's Encrypt is enabled and all prerequisites are accomplished.
   bool get isLetsEncryptEnabled =>
       allowLetsEncrypt &&
       letsEncryptDirectory != null &&
@@ -78,13 +85,37 @@ class PetitHTTPD {
     server.autoCompress = true;
   }
 
-  Handler _createShelfHandler() {
-    return const Pipeline()
-        .addMiddleware(logRequests())
+  Handler _createShelfHandler({bool withSecureServer = false}) {
+    var pipeline = const Pipeline().addMiddleware(logRequests());
+
+    if (withSecureServer && redirectToHTTPS) {
+      pipeline = pipeline.addMiddleware(_redirectToHttpsMiddleware);
+    }
+
+    pipeline = pipeline
         .addMiddleware(gzipMiddleware)
-        .addMiddleware(_headersMiddleware)
-        .addHandler(createStaticHandler(documentRoot.path,
-            defaultDocument: 'index.html'));
+        .addMiddleware(_headersMiddleware);
+
+    var handler = pipeline.addHandler(
+        createStaticHandler(documentRoot.path, defaultDocument: 'index.html'));
+
+    return handler;
+  }
+
+  Handler _redirectToHttpsMiddleware(Handler innerHandler) {
+    return (request) {
+      var requestedUri = request.requestedUri;
+
+      if (requestedUri.scheme == 'http') {
+        final domains = this.domains;
+        if (domains != null && domains.containsKey(requestedUri.host)) {
+          var secureUri = requestedUri.replace(scheme: 'https');
+          return Response.seeOther(secureUri);
+        }
+      }
+
+      return innerHandler(request);
+    };
   }
 
   static Handler _headersMiddleware(Handler innerHandler) {
@@ -194,7 +225,7 @@ class PetitHTTPD {
     final LetsEncrypt letsEncrypt =
         LetsEncrypt(certificatesHandler, production: true);
 
-    var handler = _createShelfHandler();
+    var handler = _createShelfHandler(withSecureServer: true);
 
     final domains = this.domains;
 

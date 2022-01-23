@@ -15,7 +15,7 @@ void main(List<String> _args) async {
   if (args.arguments.isEmpty) {
     print('USAGE:');
     print(
-        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com -cors\n');
+        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com -cors -force-https\n');
     exit(0);
   }
 
@@ -33,6 +33,8 @@ void main(List<String> _args) async {
   var domain = args.optionAsString('domain');
   var email =
       args.optionAsString('email', (domain != null ? 'contact@$domain' : null));
+
+  var forceHttps = args.flag('force-https');
 
   var verbose = args.flag('v');
 
@@ -55,7 +57,8 @@ void main(List<String> _args) async {
       letsEncryptDirectory: letsEncrypt,
       domains: {
         if (domain != null) domain: email!,
-      });
+      },
+      redirectToHTTPS: forceHttps);
 
   var ok = await petitHTTPD.start();
 
