@@ -1,3 +1,7 @@
+## 1.0.4
+
+- mercury_client: ^2.1.5
+
 ## 1.0.3
 
 - `petit_httpd` new option:
