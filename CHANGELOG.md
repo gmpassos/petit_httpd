@@ -1,3 +1,7 @@
+## 1.0.5
+
+- Added `-cache-control` parameter.
+
 ## 1.0.4
 
 - mercury_client: ^2.1.5

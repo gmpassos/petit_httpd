@@ -9,7 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.0.4';
+  static const String VERSION = '1.0.5';
 
   /// The document root [Directory].
   final Directory documentRoot;
@@ -25,6 +25,10 @@ class PetitHTTPD {
 
   /// If `true` the `Cache-Control` header will be set for successful responses.
   final bool setHeaderCacheControl;
+
+  /// Personalized value for the header `Cache-Control`.
+  /// Will be used if [setHeaderCacheControl] is `true`.
+  final String? headerCacheControl;
 
   /// If `true` CORS` headers will be set for successful responses.
   final bool setCORSHeaders;
@@ -48,6 +52,7 @@ class PetitHTTPD {
       this.securePort = 443,
       this.bindingAddress = 'localhost',
       this.setHeaderCacheControl = true,
+      this.headerCacheControl,
       this.setCORSHeaders = true,
       this.redirectToHTTPS = true,
       this.allowLetsEncrypt = true,
@@ -118,14 +123,14 @@ class PetitHTTPD {
     };
   }
 
-  static Handler _headersMiddleware(Handler innerHandler) {
+  Handler _headersMiddleware(Handler innerHandler) {
     return (request) {
       return Future.sync(() => innerHandler(request))
           .then((response) => _configureHeaders(request, response));
     };
   }
 
-  static Response _configureHeaders(Request request, Response response,
+  Response _configureHeaders(Request request, Response response,
       {Map<String, String>? headers}) {
     headers ??= <String, String>{};
 
@@ -136,10 +141,20 @@ class PetitHTTPD {
       return response.change(headers: headers);
     }
 
-    headers[HttpHeaders.cacheControlHeader] =
-        'private, must-revalidate, max-age=0';
+    if (setHeaderCacheControl) {
+      var headerCacheControl = this.headerCacheControl?.trim();
 
-    headers = setHeadersCORS(request, response, headers: headers);
+      var cacheControl = headerCacheControl != null &&
+              headerCacheControl.isNotEmpty
+          ? headerCacheControl
+          : 'private, must-revalidate, max-age=1, stale-while-revalidate=60';
+
+      headers[HttpHeaders.cacheControlHeader] = cacheControl;
+    }
+
+    if (setCORSHeaders) {
+      headers = setHeadersCORS(request, response, headers: headers);
+    }
 
     return response.change(headers: headers);
   }

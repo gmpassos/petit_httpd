@@ -22,7 +22,7 @@ void main(List<String> _args) async {
   if (args.arguments.isEmpty) {
     print('USAGE:');
     print(
-        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com -cors -force-https\n');
+        '  \$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt --domain domain.com -cors -cache-control no-cache -force-https -verbose\n');
     exit(0);
   }
 
@@ -41,6 +41,11 @@ void main(List<String> _args) async {
   var email =
       args.optionAsString('email', (domain != null ? 'contact@$domain' : null));
 
+  var cacheControl = args.optionAsString('cache-control')?.trim();
+  if (cacheControl != null && cacheControl.isEmpty) {
+    cacheControl = null;
+  }
+
   var forceHttps = args.flag('force-https');
 
   var verbose = args.flag('verbose');
@@ -50,6 +55,10 @@ void main(List<String> _args) async {
     print('-- Port: $port');
     print('-- Secure port: $securePort');
     print('-- Binding address: $address');
+    print('-- CORS: $cors');
+    if (cacheControl != null) {
+      print('-- Cache-Control: $cacheControl');
+    }
     if (domain != null) {
       print('-- Force HTTPS: $forceHttps');
       print('-- Domain: $domain > $email');
@@ -63,6 +72,7 @@ void main(List<String> _args) async {
       securePort: securePort,
       bindingAddress: address,
       setCORSHeaders: cors,
+      headerCacheControl: cacheControl,
       letsEncryptDirectory: letsEncrypt,
       domains: {
         if (domain != null) domain: email!,
