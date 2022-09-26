@@ -12,8 +12,8 @@ executables:
 
 dependencies:
   args_simple: ^1.0.0
-  shelf: ^1.2.0
-  shelf_static: ^1.1.0
+  shelf: ^1.4.0
+  shelf_static: ^1.1.1
   shelf_gzip: ^4.0.0
   shelf_letsencrypt: ^1.0.0
 

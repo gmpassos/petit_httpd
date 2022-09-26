@@ -1,6 +1,9 @@
 ## 1.0.5
 
 - Added `-cache-control` parameter.
+- shelf: ^1.4.0
+- shelf_static: ^1.1.1
+- sdk: '>=2.17.0 <3.0.0' 
 
 ## 1.0.4
 
