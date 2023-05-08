@@ -249,8 +249,7 @@ class PetitHTTPD {
 
     var servers = await letsEncrypt.startSecureServer(
       handler,
-      domain,
-      domainEmail,
+      {domain: domainEmail},
       port: port,
       securePort: securePort,
       bindingAddress: bindingAddress,
