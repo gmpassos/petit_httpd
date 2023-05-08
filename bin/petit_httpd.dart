@@ -6,8 +6,8 @@ import 'package:petit_httpd/petit_httpd.dart';
 void _printLine() => print(
     '========================================================================');
 
-void main(List<String> _args) async {
-  var args = ArgsSimple.parse(_args);
+void main(List<String> argsOrig) async {
+  var args = ArgsSimple.parse(argsOrig);
 
   var version = args.flag('version');
 

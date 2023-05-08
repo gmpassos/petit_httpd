@@ -223,14 +223,14 @@ class PetitHTTPD {
 
     var host = request.headers['host'];
     if (host != null) {
-      origin = requestedUri.scheme + "://" + host + "/";
+      origin = "${requestedUri.scheme}://$host/";
       return origin;
     }
 
     var remoteHost = getRemoteAddress(request) ?? host;
     if (remoteHost == null) return null;
 
-    origin = requestedUri.scheme + "://" + remoteHost + "/";
+    origin = "${requestedUri.scheme}://$remoteHost/";
     return origin;
   }
 
