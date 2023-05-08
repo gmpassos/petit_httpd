@@ -3,7 +3,7 @@
 [![pub package](https://img.shields.io/pub/v/petit_httpd.svg?logo=dart&logoColor=00b9fc)](https://pub.dev/packages/petit_httpd)
 [![Null Safety](https://img.shields.io/badge/null-safety-brightgreen)](https://dart.dev/null-safety)
 [![Codecov](https://img.shields.io/codecov/c/github/gmpassos/petit_httpd)](https://app.codecov.io/gh/gmpassos/petit_httpd)
-[![CI](https://img.shields.io/github/workflow/status/gmpassos/petit_httpd/Dart%20CI/master?logo=github-actions&logoColor=white)](https://github.com/gmpassos/petit_httpd/actions)
+[![Dart CI](https://github.com/gmpassos/petit_httpd/actions/workflows/dart.yml/badge.svg?branch=master)](https://github.com/gmpassos/petit_httpd/actions/workflows/dart.yml)
 [![GitHub Tag](https://img.shields.io/github/v/tag/gmpassos/petit_httpd?logo=git&logoColor=white)](https://github.com/gmpassos/petit_httpd/releases)
 [![New Commits](https://img.shields.io/github/commits-since/gmpassos/petit_httpd/latest?logo=git&logoColor=white)](https://github.com/gmpassos/petit_httpd/network)
 [![Last Commits](https://img.shields.io/github/last-commit/gmpassos/petit_httpd?logo=git&logoColor=white)](https://github.com/gmpassos/petit_httpd/commits/master)
