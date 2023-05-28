@@ -1,3 +1,9 @@
+## 1.1.0
+
+- sdk: '>=3.0.0 <4.0.0'
+- shelf_letsencrypt: ^1.2.0
+- lints: ^2.1.0
+
 ## 1.0.6
 
 - Fix call to `LetsEncrypt.startSecureServer`.
