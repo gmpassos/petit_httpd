@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_gzip/shelf_gzip.dart';
@@ -190,30 +191,85 @@ class PetitHTTPD {
         .addMiddleware(gzipMiddleware)
         .addMiddleware(_headersMiddleware);
 
+    // Created first: it validates the document root.
+    var staticHandler = createStaticHandler(
+      documentRoot.path,
+      defaultDocument: _defaultDocument,
+    );
+
     if (!serveHiddenFiles) {
-      pipeline = pipeline.addMiddleware(_hiddenFilesMiddleware);
+      pipeline = pipeline.addMiddleware(
+        _hiddenFilesMiddleware(
+          Directory(documentRoot.path).resolveSymbolicLinksSync(),
+        ),
+      );
     }
 
-    var handler = pipeline.addHandler(
-      createStaticHandler(documentRoot.path, defaultDocument: 'index.html'),
-    );
+    var handler = pipeline.addHandler(staticHandler);
 
     return handler;
   }
 
-  /// Answers `404` for a hidden path (see [isHiddenPath]), checking the same
-  /// decoded segments that the static handler maps to the file system.
-  ///
-  /// (An undecodable path never gets here: the [Request] constructor already
-  /// parses its `pathSegments`.)
-  Handler _hiddenFilesMiddleware(Handler innerHandler) {
-    return (request) {
-      if (isHiddenPath(request.url.pathSegments)) {
-        return Response.notFound('Not Found');
-      }
+  static const String _defaultDocument = 'index.html';
 
-      return innerHandler(request);
+  /// Answers `404` for a hidden path (see [isHiddenPath]):
+  ///
+  /// 1. The decoded segments of the request, the same that the static
+  ///    handler maps to the file system. (An undecodable path never gets
+  ///    here: the [Request] constructor already parses its `pathSegments`.)
+  /// 2. The real path (symbolic links resolved) of the requested entry, and
+  ///    of its default document, relative to the resolved [rootPath]. This
+  ///    blocks a visible symbolic link to a hidden entry, and names that the
+  ///    file system maps to a hidden entry (such as a Windows 8.3 short name).
+  Middleware _hiddenFilesMiddleware(String rootPath) {
+    return (Handler innerHandler) {
+      return (request) async {
+        var segments = request.url.pathSegments;
+
+        if (isHiddenPath(segments) ||
+            await _isHiddenRealPath(rootPath, segments)) {
+          return Response.notFound('Not Found');
+        }
+
+        return innerHandler(request);
+      };
     };
+  }
+
+  static Future<bool> _isHiddenRealPath(
+    String rootPath,
+    List<String> segments,
+  ) async {
+    var path = p.joinAll([rootPath, ...segments]);
+
+    var type = await FileSystemEntity.type(path);
+    if (type == FileSystemEntityType.notFound) return false;
+
+    if (await _isHiddenRealPathOf(rootPath, path)) return true;
+
+    if (type == FileSystemEntityType.directory) {
+      var defaultDocument = p.join(path, _defaultDocument);
+      if (await FileSystemEntity.type(defaultDocument) !=
+              FileSystemEntityType.notFound &&
+          await _isHiddenRealPathOf(rootPath, defaultDocument)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static Future<bool> _isHiddenRealPathOf(String rootPath, String path) async {
+    var realPath = await File(path)
+        .resolveSymbolicLinks()
+        .then<String?>((s) => s, onError: (Object _) => null);
+    // Not resolvable (removed or changed after the type check): fail closed.
+    if (realPath == null) return true;
+
+    // Outside the root: never served by the static handler.
+    if (!p.isWithin(rootPath, realPath)) return false;
+
+    return isHiddenPath(p.split(p.relative(realPath, from: rootPath)));
   }
 
   Handler _redirectToHttpsMiddleware(Handler innerHandler) {

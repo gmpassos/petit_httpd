@@ -683,6 +683,10 @@ void main() {
         '/%2EWELL-KNOWN/security.txt',
         '/x/../.well-known/.secret',
         '//.well-known/.secret',
+        // Control characters:
+        '/%00.env',
+        '/.env%00',
+        '/sub/%00/.secret',
       ];
 
       for (var path in hiddenPaths) {
@@ -852,6 +856,98 @@ void main() {
 
         // Still a 404 for a missing hidden file:
         r = await get(httpd, '/.missing');
+        expect(r.status, equals(404));
+      });
+
+      group('symbolic links', () {
+        void link(String path, String target) =>
+            Link(p.joinAll([docRoot.path, ...path.split('/')]))
+                .createSync(p.joinAll([docRoot.path, ...target.split('/')]));
+
+        setUp(() {
+          link('env-link.txt', '.env');
+          link('git-link', '.git');
+          link('hidden-link', '.hidden');
+          link('sub/secret-link', 'sub/.secret');
+          link('security-link.txt', '.well-known/security.txt');
+          link('hello-link.txt', 'hello.txt');
+          link('sub-link', 'sub');
+          // A visible directory whose index is a link to a hidden file:
+          Directory(p.join(docRoot.path, 'tricky')).createSync();
+          link('tricky/index.html', '.hidden/index.html');
+          link('tricky/page.txt', '.hidden/x.txt');
+        });
+
+        for (var path in [
+          '/env-link.txt',
+          '/git-link/config',
+          '/git-link/',
+          '/git-link',
+          '/hidden-link/x.txt',
+          '/hidden-link/',
+          '/sub/secret-link',
+          '/tricky/',
+          '/tricky',
+          '/tricky/index.html',
+          '/tricky/page.txt',
+        ]) {
+          test('to a hidden entry, 404: $path', () async {
+            var httpd = await startServer();
+
+            var r = await _rawGet(httpd.boundPort!, path);
+            expect(r.status, equals(404), reason: r.raw);
+            expect(r.raw, isNot(contains(hiddenMark)));
+          });
+        }
+
+        test('to visible and /.well-known/ entries are served', () async {
+          var httpd = await startServer();
+
+          var r = await get(httpd, '/hello-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('Hello World!'));
+
+          r = await get(httpd, '/sub-link/');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('sub index'));
+
+          r = await get(httpd, '/security-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('Contact: mailto:a@b.com'));
+        });
+
+        test('serveHiddenFiles: true serves them', () async {
+          var httpd = await startServer(serveHiddenFiles: true);
+
+          var r = await get(httpd, '/env-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('KEY=$hiddenMark'));
+
+          r = await get(httpd, '/tricky/');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('hidden index $hiddenMark'));
+        });
+      }, skip: Platform.isWindows ? 'No symbolic links on Windows' : false);
+
+      test('a document root inside a hidden directory is served', () async {
+        var root = Directory(p.join(tempDir.path, '.site', 'www'))
+          ..createSync(recursive: true);
+        File(p.join(root.path, 'index.html')).writeAsStringSync('site index');
+        File(p.join(root.path, 'page.txt')).writeAsStringSync('site page');
+        File(p.join(root.path, '.env')).writeAsStringSync('KEY=$hiddenMark');
+
+        var httpd = PetitHTTPD(root, port: 0, bindingAddress: '127.0.0.1');
+        addTearDown(() => httpd.stop(force: true));
+        await httpd.start();
+
+        var r = await get(httpd, '/');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('site index'));
+
+        r = await get(httpd, '/page.txt');
+        expect(r.bodyAsString, equals('site page'));
+
+        r = await get(httpd, '/.env');
         expect(r.status, equals(404));
       });
     });

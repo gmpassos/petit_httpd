@@ -93,7 +93,8 @@ Options:
 
 By default (since `1.3.0`) hidden files and directories are **not** served: a request with any
 path segment starting with `.` (such as `/.env`, `/.git/config` or `/sub/.secret`, also when
-encoded as `%2e`) gets a `404 Not Found`, as if it didn't exist.
+encoded as `%2e`) gets a `404 Not Found`, as if it didn't exist. A visible symbolic link to a
+hidden entry is not served either.
 
 The exception is `/.well-known/` ([RFC 8615](https://www.rfc-editor.org/rfc/rfc8615)), used by
 Let's Encrypt challenges, `security.txt` and others (`PetitHTTPD.allowedHiddenDirectories`).
