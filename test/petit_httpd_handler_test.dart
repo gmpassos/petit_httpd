@@ -186,6 +186,59 @@ void main() {
       expect(r.headers['server'], equals('petit_httpd/${PetitHTTPD.VERSION}'));
       expect(r.headers['cache-control'], isNull);
     });
+
+    test('a blank custom Cache-Control uses the default', () async {
+      var handler = PetitHTTPD(
+        docRoot,
+        headerCacheControl: '   ',
+      ).createHandler();
+
+      var r = await call(handler, 'http://example.com/hello.txt');
+      expect(
+        r.headers['cache-control'],
+        equals(
+          'private, must-revalidate, max-age=1, stale-while-revalidate=60',
+        ),
+      );
+    });
+
+    test('a custom Cache-Control is ignored when disabled', () async {
+      var handler = PetitHTTPD(
+        docRoot,
+        setHeaderCacheControl: false,
+        headerCacheControl: 'no-store',
+      ).createHandler();
+
+      var r = await call(handler, 'http://example.com/hello.txt');
+      expect(r.statusCode, equals(200));
+      expect(r.headers['cache-control'], isNull);
+    });
+
+    test('the redirect response has no petit_httpd headers', () async {
+      var handler = create().createHandler(withSecureServer: true);
+
+      var r = await call(handler, 'http://example.com/hello.txt');
+      expect(r.statusCode, equals(303));
+      // Current behaviour: the redirect middleware runs before the headers
+      // middleware, so not even the `Server` header is set.
+      expect(r.headers['server'], isNull);
+      expect(r.headers['cache-control'], isNull);
+      expect(r.headers['access-control-allow-origin'], isNull);
+    });
+
+    test('the `Origin` keeps the request scheme', () async {
+      var handler = create().createHandler();
+
+      var r = await call(
+        handler,
+        'https://example.com/hello.txt',
+        headers: {'host': 'example.com'},
+      );
+      expect(
+        r.headers['access-control-allow-origin'],
+        equals('https://example.com/'),
+      );
+    });
   });
 
   group('CORS helpers', () {

@@ -1,6 +1,7 @@
 @TestOn('vm')
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -258,5 +259,113 @@ void main() {
 
       expect(result.exitCode, equals(64), reason: '${result.stderr}');
     });
+
+    test('usage', () async {
+      var result = await Process.run(Platform.resolvedExecutable, [
+        'bin/petit_httpd.dart',
+      ]);
+
+      expect(result.exitCode, equals(0), reason: '${result.stderr}');
+      expect('${result.stdout}', contains('USAGE:'));
+      expect('${result.stdout}', contains(petitHTTPDUsage));
+    });
+
+    test('missing document root exits with 1', () async {
+      var result = await Process.run(Platform.resolvedExecutable, [
+        'bin/petit_httpd.dart',
+        p.join(tempDir.path, 'missing'),
+      ]);
+
+      expect(result.exitCode, equals(1), reason: '${result.stderr}');
+      expect('${result.stdout}', contains('document root not found'));
+    });
+
+    test(
+      'serves files until killed',
+      () async {
+        // The CLI logs the configured port, so it can't be `0`:
+        var socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        var port = socket.port;
+        await socket.close();
+
+        var process = await Process.start(Platform.resolvedExecutable, [
+          'bin/petit_httpd.dart',
+          tempDir.path,
+          '--port',
+          '$port',
+          '--address',
+          '127.0.0.1',
+          '--cache-control',
+          'no-cache',
+          '-cors',
+        ]);
+        addTearDown(() => process.kill(ProcessSignal.sigkill));
+
+        var lines = <String>[];
+        var newLine = StreamController<void>.broadcast();
+        addTearDown(newLine.close);
+        process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((l) {
+              lines.add(l);
+              newLine.add(null);
+            });
+        var stderr = StringBuffer();
+        process.stderr.transform(utf8.decoder).listen(stderr.write);
+
+        int? exitCode;
+        unawaited(
+          process.exitCode.then((c) {
+            exitCode = c;
+            if (!newLine.isClosed) newLine.add(null);
+          }),
+        );
+
+        Future<String> waitLine(String s) async {
+          while (true) {
+            var line = lines.where((l) => l.contains(s)).firstOrNull;
+            if (line != null) return line;
+            if (exitCode != null) {
+              fail('Process exited ($exitCode) before `$s`:\n$lines\n$stderr');
+            }
+            await newLine.stream.first;
+          }
+        }
+
+        var started = await waitLine('-- STARTED:');
+        expect(started, contains('port: $port'));
+
+        var client = HttpClient();
+        addTearDown(() => client.close(force: true));
+
+        var request = await client.get('127.0.0.1', port, '/hello.txt');
+        request.headers.set('origin', 'https://example.com');
+        var response = await request.close();
+        var body = await response.transform(utf8.decoder).join();
+
+        expect(response.statusCode, equals(200));
+        expect(body, equals('Hello CLI!'));
+        expect(response.headers.value('cache-control'), equals('no-cache'));
+        expect(
+          response.headers.value('access-control-allow-origin'),
+          equals('https://example.com'),
+        );
+
+        // Requests are logged to stdout:
+        expect(await waitLine('/hello.txt'), contains('[200]'));
+
+        expect(process.kill(), isTrue);
+        expect(await process.exitCode, isNot(equals(0)));
+
+        // The port is released:
+        await expectLater(
+          Socket.connect('127.0.0.1', port),
+          throwsA(isA<SocketException>()),
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+      skip: Platform.isWindows ? 'Uses POSIX signals' : false,
+    );
   });
 }

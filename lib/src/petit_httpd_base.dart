@@ -9,7 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.2.0';
+  static const String VERSION = '1.2.1';
 
   /// The document root [Directory].
   final Directory documentRoot;
