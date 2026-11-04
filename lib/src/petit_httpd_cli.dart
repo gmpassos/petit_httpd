@@ -9,7 +9,7 @@ const String petitHTTPDUsage =
     '  \$> petit_httpd ./www --port 8080 --secure-port 443 --address 0.0.0.0 '
     '--letsencrypt-path /etc/letsencrypt/live --domain domain.com '
     '--email contact@domain.com --cache-control no-cache '
-    '-cors -force-https -verbose';
+    '-cors -force-https -serve-hidden-files -verbose';
 
 /// Creates a [PetitHTTPD] from the parsed CLI [args].
 ///
@@ -48,6 +48,16 @@ PetitHTTPD petitHTTPDFromArgs(ArgsSimple args) {
 
   var forceHttps = args.flag('force-https');
 
+  // `--serve-hidden-files` would be parsed as an option, taking the next
+  // argument (possibly the document root) as its value:
+  if (args.optionAsString('serve-hidden-files') != null) {
+    throw FormatException(
+      '`-serve-hidden-files` is a flag (single `-`), not `--serve-hidden-files`',
+    );
+  }
+
+  var serveHiddenFiles = args.flag('serve-hidden-files');
+
   return PetitHTTPD(
     documentRoot,
     port: port,
@@ -58,6 +68,7 @@ PetitHTTPD petitHTTPDFromArgs(ArgsSimple args) {
     letsEncryptDirectory: letsEncrypt,
     domains: domains,
     redirectToHTTPS: forceHttps,
+    serveHiddenFiles: serveHiddenFiles,
   );
 }
 
@@ -122,6 +133,7 @@ Future<int?> runPetitHTTPD(
     log('-- Secure port: ${petitHTTPD.securePort}');
     log('-- Binding address: ${petitHTTPD.bindingAddress}');
     log('-- CORS: ${petitHTTPD.setCORSHeaders}');
+    log('-- Serve hidden files: ${petitHTTPD.serveHiddenFiles}');
     var cacheControl = petitHTTPD.headerCacheControl;
     if (cacheControl != null) {
       log('-- Cache-Control: $cacheControl');

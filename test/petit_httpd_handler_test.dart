@@ -44,10 +44,16 @@ void main() {
       expect(httpd.setCORSHeaders, isTrue);
       expect(httpd.setHeaderCacheControl, isTrue);
       expect(httpd.redirectToHTTPS, isTrue);
+      expect(httpd.serveHiddenFiles, isFalse);
       expect(httpd.isLetsEncryptEnabled, isFalse);
       expect(httpd.isStarted, isFalse);
       expect(httpd.letsEncryptDomains, isEmpty);
       expect(httpd.toString(), contains('letsEncrypt: disabled'));
+      expect(httpd.toString(), isNot(contains('serveHiddenFiles')));
+
+      httpd = PetitHTTPD(docRoot, serveHiddenFiles: true);
+      expect(httpd.serveHiddenFiles, isTrue);
+      expect(httpd.toString(), contains('serveHiddenFiles: true'));
     });
 
     test('isLetsEncryptEnabled', () {
@@ -109,6 +115,84 @@ void main() {
             .toString(),
         equals('https://example.com:8443/x/'),
       );
+    });
+  });
+
+  group('isHiddenPath', () {
+    test('allowedHiddenDirectories', () {
+      expect(PetitHTTPD.allowedHiddenDirectories, equals(['.well-known']));
+    });
+
+    List<String> segments(String path) => Uri.parse(path).pathSegments;
+
+    test('hidden', () {
+      for (var path in [
+        '/.env',
+        '/.env/',
+        '/.git/config',
+        '/sub/.secret',
+        '/a/b/c/.secret',
+        '/.hidden/x.txt',
+        '/sub/.hidden/',
+        '/..foo',
+        '/%2eenv',
+        '/%2Egit/config',
+        '/sub%2f.secret',
+        '/sub%2F.secret',
+        '/%5c.env',
+        '/sub%5C.secret',
+        '/.well-known/.secret',
+        '/.well-known/a/.secret',
+        '/.well-known%2f.secret',
+        '/.well-known%5c.secret',
+        '/sub/.well-known/x',
+        '/sub%2f.well-known/x',
+        '/.WELL-KNOWN/x',
+        '/.Well-Known/x',
+        '/.well-known-x/y',
+        '/.well-knownx',
+      ]) {
+        expect(PetitHTTPD.isHiddenPath(segments(path)), isTrue, reason: path);
+      }
+
+      // An empty segment before it: `.well-known` is not the first one.
+      expect(PetitHTTPD.isHiddenPath(['', '.well-known', 'x']), isTrue);
+
+      // Dot segments (`Uri.parse` would remove them):
+      for (var s in [
+        ['.'],
+        ['..'],
+        ['sub', '..'],
+        ['.well-known', '..', '.env'],
+        ['sub/..'],
+        [r'sub\..'],
+      ]) {
+        expect(PetitHTTPD.isHiddenPath(s), isTrue, reason: '$s');
+      }
+    });
+
+    test('not hidden', () {
+      for (var path in [
+        '/',
+        '/hello.txt',
+        '/sub/',
+        '/sub/file.min.js',
+        '/dir.d/x',
+        '/a.',
+        '/a..b',
+        '/env.',
+        '/%252eenv',
+        '/a%2fb',
+        '/.well-known',
+        '/.well-known/',
+        '/.well-known/security.txt',
+        '/.well-known/acme-challenge/token',
+        '/%2ewell-known/security.txt',
+      ]) {
+        expect(PetitHTTPD.isHiddenPath(segments(path)), isFalse, reason: path);
+      }
+
+      expect(PetitHTTPD.isHiddenPath(const []), isFalse);
     });
   });
 
@@ -224,6 +308,48 @@ void main() {
       expect(r.headers['server'], isNull);
       expect(r.headers['cache-control'], isNull);
       expect(r.headers['access-control-allow-origin'], isNull);
+    });
+
+    test('hidden files: 404 unless serveHiddenFiles', () async {
+      File(p.join(docRoot.path, '.env')).writeAsStringSync('KEY=value');
+      var wellKnown = Directory(p.join(docRoot.path, '.well-known'))
+        ..createSync();
+      File(p.join(wellKnown.path, 'security.txt')).writeAsStringSync('sec');
+
+      var handler = PetitHTTPD(docRoot).createHandler();
+
+      var r = await call(handler, 'http://example.com/.env');
+      expect(r.statusCode, equals(404));
+      expect(await r.readAsString(), equals('Not Found'));
+      // The same headers as any 404:
+      expect(r.headers['server'], equals('petit_httpd/${PetitHTTPD.VERSION}'));
+      expect(r.headers['cache-control'], isNull);
+
+      r = await call(handler, 'http://example.com/%2Eenv');
+      expect(r.statusCode, equals(404));
+
+      r = await call(handler, 'http://example.com/.well-known/security.txt');
+      expect(r.statusCode, equals(200));
+      expect(await r.readAsString(), equals('sec'));
+
+      handler = PetitHTTPD(docRoot, serveHiddenFiles: true).createHandler();
+
+      r = await call(handler, 'http://example.com/.env');
+      expect(r.statusCode, equals(200));
+      expect(await r.readAsString(), equals('KEY=value'));
+    });
+
+    test('hidden files: the HTTPS redirect comes first', () async {
+      File(p.join(docRoot.path, '.env')).writeAsStringSync('KEY=value');
+
+      var handler = create().createHandler(withSecureServer: true);
+
+      var r = await call(handler, 'http://example.com/.env');
+      expect(r.statusCode, equals(303));
+      expect(r.headers['location'], equals('https://example.com/.env'));
+
+      r = await call(handler, 'https://example.com/.env');
+      expect(r.statusCode, equals(404));
     });
 
     test('the `Origin` keeps the request scheme', () async {

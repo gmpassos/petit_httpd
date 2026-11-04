@@ -85,8 +85,22 @@ Options:
 - `--cache-control`: the `Cache-Control` header for successful responses.
 - `-cors`: sets the CORS headers.
 - `-force-https`: redirects HTTP requests of the domain to HTTPS.
+- `-serve-hidden-files`: serves hidden files and directories (see below).
 - `-verbose`: shows the configuration at startup.
 - `-version`: shows the version and exits.
+
+### Hidden files
+
+By default (since `1.3.0`) hidden files and directories are **not** served: a request with any
+path segment starting with `.` (such as `/.env`, `/.git/config` or `/sub/.secret`, also when
+encoded as `%2e`) gets a `404 Not Found`, as if it didn't exist.
+
+The exception is `/.well-known/` ([RFC 8615](https://www.rfc-editor.org/rfc/rfc8615)), used by
+Let's Encrypt challenges, `security.txt` and others (`PetitHTTPD.allowedHiddenDirectories`).
+Hidden entries inside it (`/.well-known/.secret`) are still not served.
+
+To serve hidden files (the behaviour before `1.3.0`), use `serveHiddenFiles: true`
+or the CLI flag `-serve-hidden-files`.
 
 A BASH script with all together:
 ```shell

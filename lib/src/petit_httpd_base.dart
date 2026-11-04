@@ -9,7 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.2.2';
+  static const String VERSION = '1.3.0';
 
   /// The document root [Directory].
   final Directory documentRoot;
@@ -48,6 +48,16 @@ class PetitHTTPD {
   /// The Let's Encrypt [Directory]
   final Directory? letsEncryptDirectory;
 
+  /// If `true` hidden files and directories (any path segment starting with
+  /// `.`, such as `/.env` or `/.git/config`) are served. Default: `false`.
+  ///
+  /// When `false` (the default) a request for a hidden path gets a `404`,
+  /// as if it didn't exist, except for the [allowedHiddenDirectories]
+  /// (`/.well-known/`).
+  ///
+  /// - See [isHiddenPath].
+  final bool serveHiddenFiles;
+
   PetitHTTPD(
     this.documentRoot, {
     this.port = 80,
@@ -60,7 +70,44 @@ class PetitHTTPD {
     this.allowLetsEncrypt = true,
     this.domains,
     this.letsEncryptDirectory,
+    this.serveHiddenFiles = false,
   });
+
+  /// The hidden directories at the root of the document root that are
+  /// served even when [serveHiddenFiles] is `false`.
+  ///
+  /// - `.well-known`: the [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615)
+  ///   well-known URIs, such as `/.well-known/security.txt` and the
+  ///   Let's Encrypt (ACME HTTP-01) `/.well-known/acme-challenge/`.
+  ///
+  /// Only the first path segment is matched (case-sensitive), and the
+  /// segments inside it are still checked: `/.well-known/.secret` and
+  /// `/sub/.well-known/` are hidden paths.
+  static const List<String> allowedHiddenDirectories = ['.well-known'];
+
+  /// Returns `true` if [pathSegments] (decoded, as in [Uri.pathSegments])
+  /// is a hidden path: any segment starting with `.`, except an
+  /// [allowedHiddenDirectories] as the first segment.
+  ///
+  /// A segment containing a `/` or a `\` (from an encoded `%2F` or `%5C`)
+  /// is checked part by part, since a file system may treat them as
+  /// separators. The `.` and `..` segments are also hidden paths.
+  static bool isHiddenPath(List<String> pathSegments) {
+    var parts = pathSegments.expand((s) => s.split(_pathSeparators));
+
+    var first = true;
+    for (var part in parts) {
+      if (part.startsWith('.') &&
+          !(first && allowedHiddenDirectories.contains(part))) {
+        return true;
+      }
+      first = false;
+    }
+
+    return false;
+  }
+
+  static final RegExp _pathSeparators = RegExp(r'[/\\]');
 
   /// Returns `true` if Let's Encrypt is enabled and all prerequisites are accomplished.
   bool get isLetsEncryptEnabled =>
@@ -143,11 +190,30 @@ class PetitHTTPD {
         .addMiddleware(gzipMiddleware)
         .addMiddleware(_headersMiddleware);
 
+    if (!serveHiddenFiles) {
+      pipeline = pipeline.addMiddleware(_hiddenFilesMiddleware);
+    }
+
     var handler = pipeline.addHandler(
       createStaticHandler(documentRoot.path, defaultDocument: 'index.html'),
     );
 
     return handler;
+  }
+
+  /// Answers `404` for a hidden path (see [isHiddenPath]), checking the same
+  /// decoded segments that the static handler maps to the file system.
+  ///
+  /// (An undecodable path never gets here: the [Request] constructor already
+  /// parses its `pathSegments`.)
+  Handler _hiddenFilesMiddleware(Handler innerHandler) {
+    return (request) {
+      if (isHiddenPath(request.url.pathSegments)) {
+        return Response.notFound('Not Found');
+      }
+
+      return innerHandler(request);
+    };
   }
 
   Handler _redirectToHttpsMiddleware(Handler innerHandler) {
@@ -338,6 +404,7 @@ class PetitHTTPD {
     var letsEncryptInfo = isLetsEncryptEnabled
         ? ', redirectToHTTPS: $redirectToHTTPS, domains: $domains, letsEncryptDirectory: $letsEncryptDirectory'
         : ', letsEncrypt: disabled';
-    return 'PetitHTTPD{ documentRoot: $documentRoot, port: $port, securePort: $securePort, bindingAddress: $bindingAddress$letsEncryptInfo }';
+    var hiddenFilesInfo = serveHiddenFiles ? ', serveHiddenFiles: true' : '';
+    return 'PetitHTTPD{ documentRoot: $documentRoot, port: $port, securePort: $securePort, bindingAddress: $bindingAddress$letsEncryptInfo$hiddenFilesInfo }';
   }
 }
