@@ -9,8 +9,8 @@ import 'package:path/path.dart' as p;
 import 'package:petit_httpd/petit_httpd.dart';
 import 'package:test/test.dart';
 
-/// Domains under the reserved `.test` TLD: never resolved through DNS, all
-/// connections are routed to the loopback by [_LoopbackHttpOverrides].
+/// Domains under the reserved `.test` TLD (RFC 6761). They are not resolved:
+/// [_LoopbackHttpOverrides] routes their connections to the loopback.
 const _domain1 = 'petit-httpd.test';
 const _domain2 = 'www.petit-httpd.test';
 
