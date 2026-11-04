@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_gzip/shelf_gzip.dart';
@@ -9,7 +10,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.2.2';
+  static const String VERSION = '1.3.0';
 
   /// The document root [Directory].
   final Directory documentRoot;
@@ -48,6 +49,16 @@ class PetitHTTPD {
   /// The Let's Encrypt [Directory]
   final Directory? letsEncryptDirectory;
 
+  /// If `true` hidden files and directories (any path segment starting with
+  /// `.`, such as `/.env` or `/.git/config`) are served. Default: `false`.
+  ///
+  /// When `false` (the default) a request for a hidden path gets a `404`,
+  /// as if it didn't exist, except for the [allowedHiddenDirectories]
+  /// (`/.well-known/`).
+  ///
+  /// - See [isHiddenPath].
+  final bool serveHiddenFiles;
+
   PetitHTTPD(
     this.documentRoot, {
     this.port = 80,
@@ -60,7 +71,44 @@ class PetitHTTPD {
     this.allowLetsEncrypt = true,
     this.domains,
     this.letsEncryptDirectory,
+    this.serveHiddenFiles = false,
   });
+
+  /// The hidden directories at the root of the document root that are
+  /// served even when [serveHiddenFiles] is `false`.
+  ///
+  /// - `.well-known`: the [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615)
+  ///   well-known URIs, such as `/.well-known/security.txt` and the
+  ///   Let's Encrypt (ACME HTTP-01) `/.well-known/acme-challenge/`.
+  ///
+  /// Only the first path segment is matched (case-sensitive), and the
+  /// segments inside it are still checked: `/.well-known/.secret` and
+  /// `/sub/.well-known/` are hidden paths.
+  static const List<String> allowedHiddenDirectories = ['.well-known'];
+
+  /// Returns `true` if [pathSegments] (decoded, as in [Uri.pathSegments])
+  /// is a hidden path: any segment starting with `.`, except an
+  /// [allowedHiddenDirectories] as the first segment.
+  ///
+  /// A segment containing a `/` or a `\` (from an encoded `%2F` or `%5C`)
+  /// is checked part by part, since a file system may treat them as
+  /// separators. The `.` and `..` segments are also hidden paths.
+  static bool isHiddenPath(List<String> pathSegments) {
+    var parts = pathSegments.expand((s) => s.split(_pathSeparators));
+
+    var first = true;
+    for (var part in parts) {
+      if (part.startsWith('.') &&
+          !(first && allowedHiddenDirectories.contains(part))) {
+        return true;
+      }
+      first = false;
+    }
+
+    return false;
+  }
+
+  static final RegExp _pathSeparators = RegExp(r'[/\\]');
 
   /// Returns `true` if Let's Encrypt is enabled and all prerequisites are accomplished.
   bool get isLetsEncryptEnabled =>
@@ -143,11 +191,85 @@ class PetitHTTPD {
         .addMiddleware(gzipMiddleware)
         .addMiddleware(_headersMiddleware);
 
-    var handler = pipeline.addHandler(
-      createStaticHandler(documentRoot.path, defaultDocument: 'index.html'),
+    // Created first: it validates the document root.
+    var staticHandler = createStaticHandler(
+      documentRoot.path,
+      defaultDocument: _defaultDocument,
     );
 
+    if (!serveHiddenFiles) {
+      pipeline = pipeline.addMiddleware(
+        _hiddenFilesMiddleware(
+          Directory(documentRoot.path).resolveSymbolicLinksSync(),
+        ),
+      );
+    }
+
+    var handler = pipeline.addHandler(staticHandler);
+
     return handler;
+  }
+
+  static const String _defaultDocument = 'index.html';
+
+  /// Answers `404` for a hidden path (see [isHiddenPath]):
+  ///
+  /// 1. The decoded segments of the request, the same that the static
+  ///    handler maps to the file system. (An undecodable path never gets
+  ///    here: the [Request] constructor already parses its `pathSegments`.)
+  /// 2. The real path (symbolic links resolved) of the requested entry, and
+  ///    of its default document, relative to the resolved [rootPath]. This
+  ///    blocks a visible symbolic link to a hidden entry, and names that the
+  ///    file system maps to a hidden entry (such as a Windows 8.3 short name).
+  Middleware _hiddenFilesMiddleware(String rootPath) {
+    return (Handler innerHandler) {
+      return (request) async {
+        var segments = request.url.pathSegments;
+
+        if (isHiddenPath(segments) ||
+            await _isHiddenRealPath(rootPath, segments)) {
+          return Response.notFound('Not Found');
+        }
+
+        return innerHandler(request);
+      };
+    };
+  }
+
+  static Future<bool> _isHiddenRealPath(
+    String rootPath,
+    List<String> segments,
+  ) async {
+    var path = p.joinAll([rootPath, ...segments]);
+
+    var type = await FileSystemEntity.type(path);
+    if (type == FileSystemEntityType.notFound) return false;
+
+    if (await _isHiddenRealPathOf(rootPath, path)) return true;
+
+    if (type == FileSystemEntityType.directory) {
+      var defaultDocument = p.join(path, _defaultDocument);
+      if (await FileSystemEntity.type(defaultDocument) !=
+              FileSystemEntityType.notFound &&
+          await _isHiddenRealPathOf(rootPath, defaultDocument)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static Future<bool> _isHiddenRealPathOf(String rootPath, String path) async {
+    var realPath = await File(path)
+        .resolveSymbolicLinks()
+        .then<String?>((s) => s, onError: (Object _) => null);
+    // Not resolvable (removed or changed after the type check): fail closed.
+    if (realPath == null) return true;
+
+    // Outside the root: never served by the static handler.
+    if (!p.isWithin(rootPath, realPath)) return false;
+
+    return isHiddenPath(p.split(p.relative(realPath, from: rootPath)));
   }
 
   Handler _redirectToHttpsMiddleware(Handler innerHandler) {
@@ -338,6 +460,7 @@ class PetitHTTPD {
     var letsEncryptInfo = isLetsEncryptEnabled
         ? ', redirectToHTTPS: $redirectToHTTPS, domains: $domains, letsEncryptDirectory: $letsEncryptDirectory'
         : ', letsEncrypt: disabled';
-    return 'PetitHTTPD{ documentRoot: $documentRoot, port: $port, securePort: $securePort, bindingAddress: $bindingAddress$letsEncryptInfo }';
+    var hiddenFilesInfo = serveHiddenFiles ? ', serveHiddenFiles: true' : '';
+    return 'PetitHTTPD{ documentRoot: $documentRoot, port: $port, securePort: $securePort, bindingAddress: $bindingAddress$letsEncryptInfo$hiddenFilesInfo }';
   }
 }

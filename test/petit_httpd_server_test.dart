@@ -54,6 +54,7 @@ void main() {
     bool setCORSHeaders = true,
     bool setHeaderCacheControl = true,
     String? headerCacheControl,
+    bool serveHiddenFiles = false,
   }) async {
     var petitHTTPD = PetitHTTPD(
       docRoot,
@@ -62,6 +63,7 @@ void main() {
       setCORSHeaders: setCORSHeaders,
       setHeaderCacheControl: setHeaderCacheControl,
       headerCacheControl: headerCacheControl,
+      serveHiddenFiles: serveHiddenFiles,
     );
     addTearDown(() => petitHTTPD.stop(force: true));
 
@@ -279,38 +281,42 @@ void main() {
       expect(r.bodyAsString, isNot(contains(secret)));
     }, skip: Platform.isWindows ? 'No symbolic links on Windows' : false);
 
-    group('path traversal', () {
-      test('control: a raw request inside the root is served', () async {
-        var httpd = await startServer();
+    for (var serveHiddenFiles in [false, true]) {
+      group('path traversal (serveHiddenFiles: $serveHiddenFiles)', () {
+        test('control: a raw request inside the root is served', () async {
+          var httpd = await startServer(serveHiddenFiles: serveHiddenFiles);
 
-        var r = await _rawGet(httpd.boundPort!, '/hello.txt');
-        expect(r.status, equals(200));
-        expect(r.raw, contains('Hello World!'));
-      });
-
-      for (var path in [
-        '/../secret.txt',
-        '/../../secret.txt',
-        '/sub/../../secret.txt',
-        '/%2e%2e/secret.txt',
-        '/%2E%2E/secret.txt',
-        '/..%2fsecret.txt',
-        '/..%2Fsecret.txt',
-        '/sub/..%2f..%2fsecret.txt',
-        '/..%5csecret.txt',
-        '/.%2e/secret.txt',
-        '//../secret.txt',
-      ]) {
-        test(path, () async {
-          var httpd = await startServer();
-
-          var r = await _rawGet(httpd.boundPort!, path);
-
-          expect(r.status, isNot(equals(200)), reason: r.raw);
-          expect(r.raw, isNot(contains(secret)));
+          var r = await _rawGet(httpd.boundPort!, '/hello.txt');
+          expect(r.status, equals(200));
+          expect(r.raw, contains('Hello World!'));
         });
-      }
-    });
+
+        for (var path in [
+          '/../secret.txt',
+          '/../../secret.txt',
+          '/sub/../../secret.txt',
+          '/%2e%2e/secret.txt',
+          '/%2E%2E/secret.txt',
+          '/..%2fsecret.txt',
+          '/..%2Fsecret.txt',
+          '/sub/..%2f..%2fsecret.txt',
+          '/..%5csecret.txt',
+          '/.%2e/secret.txt',
+          '//../secret.txt',
+          '/.well-known/../../secret.txt',
+          '/.well-known/..%2f..%2fsecret.txt',
+        ]) {
+          test(path, () async {
+            var httpd = await startServer(serveHiddenFiles: serveHiddenFiles);
+
+            var r = await _rawGet(httpd.boundPort!, path);
+
+            expect(r.status, isNot(equals(200)), reason: r.raw);
+            expect(r.raw, isNot(contains(secret)));
+          });
+        }
+      });
+    }
 
     group('range requests', () {
       // `large.txt` is larger than the gzip threshold, but a partial response
@@ -603,22 +609,347 @@ void main() {
       }
     });
 
-    test('hidden files and directories are served', () async {
-      // Current behaviour (pinned, see the CHANGELOG notes): dot-files in the
-      // document root are not filtered out.
-      var httpd = await startServer();
+    group('hidden files', () {
+      const hiddenMark = 'HIDDEN-CONTENT';
 
-      File(p.join(docRoot.path, '.env')).writeAsStringSync('KEY=value');
-      var git = Directory(p.join(docRoot.path, '.git'))..createSync();
-      File(p.join(git.path, 'config')).writeAsStringSync('[core]');
+      void writeFile(String path, String content) {
+        var file = File(p.joinAll([docRoot.path, ...path.split('/')]));
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync(content);
+      }
 
-      var r = await get(httpd, '/.env');
-      expect(r.status, equals(200));
-      expect(r.bodyAsString, equals('KEY=value'));
+      setUp(() {
+        writeFile('.env', 'KEY=$hiddenMark');
+        writeFile('.git/config', '[core] $hiddenMark');
+        writeFile('.git/index.html', 'git index $hiddenMark');
+        writeFile('sub/.secret', 'sub secret $hiddenMark');
+        writeFile('.hidden/x.txt', 'hidden x $hiddenMark');
+        writeFile('.hidden/index.html', 'hidden index $hiddenMark');
+        writeFile('.well-known/security.txt', 'Contact: mailto:a@b.com');
+        writeFile('.well-known/acme-challenge/token-1', 'token-1.thumbprint');
+        writeFile('.well-known/.secret', 'well-known secret $hiddenMark');
+        writeFile('sub/.well-known/x.txt', 'nested well-known $hiddenMark');
+        // A visible name with dots (not hidden):
+        writeFile('dir.d/file.min.js', 'visible');
+        // A visible name with a literal `%2e` (served as is, never decoded
+        // twice):
+        writeFile('%2eenv', 'literal percent');
+      });
 
-      r = await get(httpd, '/.git/config');
-      expect(r.status, equals(200));
-      expect(r.bodyAsString, equals('[core]'));
+      // Hidden paths, sent raw (not normalized by a client):
+      const hiddenPaths = [
+        '/.env',
+        '/.env/',
+        '/.env?x=1',
+        '/.env?.well-known/',
+        '/.git/config',
+        '/.git/',
+        '/.git',
+        '/sub/.secret',
+        '/sub/.secret/',
+        '/.hidden/x.txt',
+        '/.hidden/',
+        '/.hidden',
+        '/.hidden/index.html',
+        '//.env',
+        '/./.env',
+        '/sub/../.env',
+        '/sub/./.secret',
+        // Encoded dots, any case:
+        '/%2eenv',
+        '/%2Eenv',
+        '/%2e%65nv',
+        '/%2Egit/config',
+        '/%2egit/config',
+        '/%2e%67%69%74/%63onfig',
+        '/sub/%2esecret',
+        '/sub/%2Esecret',
+        '/%2Ehidden/',
+        // Encoded separators:
+        '/sub%2f.secret',
+        '/sub%2F%2esecret',
+        '/%5c.env',
+        '/%5C.env',
+        '/sub%5c.secret',
+        '/x/..%2f.env',
+        '/x/..%5c.env',
+        // Only `/.well-known/` is allowed, case-sensitive:
+        '/.well-known/.secret',
+        '/.well-known/%2esecret',
+        '/.well-known%2f.secret',
+        '/sub/.well-known/x.txt',
+        '/.WELL-KNOWN/security.txt',
+        '/.Well-Known/security.txt',
+        '/%2EWELL-KNOWN/security.txt',
+        '/x/../.well-known/.secret',
+        '//.well-known/.secret',
+        // Control characters:
+        '/%00.env',
+        '/.env%00',
+        '/sub/%00/.secret',
+      ];
+
+      for (var path in hiddenPaths) {
+        test('404: $path', () async {
+          var httpd = await startServer();
+
+          var r = await _rawGet(httpd.boundPort!, path);
+          expect(r.status, equals(404), reason: r.raw);
+          expect(r.raw, isNot(contains(hiddenMark)));
+          // Not a successful response: no Cache-Control nor CORS headers.
+          expect(r.raw.toLowerCase(), isNot(contains('cache-control')));
+        });
+      }
+
+      test('404 for any method, HEAD and range requests', () async {
+        var httpd = await startServer();
+
+        for (var method in ['GET', 'HEAD', 'POST', 'PUT', 'OPTIONS']) {
+          for (var path in ['/.env', '/.git/config', '/%2eenv']) {
+            var r = await _rawGet(httpd.boundPort!, path, method: method);
+            expect(r.status, equals(404), reason: '$method $path');
+            expect(r.raw, isNot(contains(hiddenMark)));
+          }
+        }
+
+        for (var range in ['bytes=0-3', 'bytes=-6', 'bytes=2-']) {
+          var r = await get(httpd, '/.env', headers: {'range': range});
+          expect(r.status, equals(404), reason: range);
+          expect(r.header('content-range'), isNull);
+          expect(r.bodyAsString, isNot(contains(hiddenMark)));
+        }
+
+        var r = await get(
+          httpd,
+          '/.git/config',
+          headers: {'if-modified-since': HttpDate.format(DateTime(2000))},
+        );
+        expect(r.status, equals(404));
+      });
+
+      test('the same 404 as a missing file (existence not revealed)', () async {
+        var httpd = await startServer();
+
+        var missing = await get(httpd, '/.missing');
+        var existing = await get(httpd, '/.env');
+
+        expect(existing.status, equals(missing.status));
+        expect(existing.bodyAsString, equals(missing.bodyAsString));
+        expect(
+          existing.header('content-length'),
+          equals(missing.header('content-length')),
+        );
+      });
+
+      test('visible files are still served', () async {
+        var httpd = await startServer();
+
+        var r = await get(httpd, '/hello.txt');
+        expect(r.bodyAsString, equals('Hello World!'));
+
+        r = await get(httpd, '/dir.d/file.min.js');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('visible'));
+
+        // `%252e` is a literal `%2e` (a visible name), not a `.`:
+        var raw = await _rawGet(httpd.boundPort!, '/%252eenv');
+        expect(raw.status, equals(200), reason: raw.raw);
+        expect(raw.raw, contains('literal percent'));
+        expect(raw.raw, isNot(contains(hiddenMark)));
+
+        r = await get(httpd, '/');
+        expect(r.bodyAsString, equals('<html>root index</html>'));
+      });
+
+      test('/.well-known/ is served', () async {
+        var httpd = await startServer();
+
+        var r = await get(httpd, '/.well-known/security.txt');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('Contact: mailto:a@b.com'));
+        // A successful response, with the configured headers:
+        expect(r.header('cache-control'), isNotNull);
+
+        r = await get(httpd, '/.well-known/acme-challenge/token-1');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('token-1.thumbprint'));
+
+        r = await get(httpd, '/.well-known/security.txt', method: 'HEAD');
+        expect(r.status, equals(200));
+        expect(r.body, isEmpty);
+
+        r = await get(
+          httpd,
+          '/.well-known/security.txt',
+          headers: {'range': 'bytes=0-6'},
+        );
+        expect(r.status, equals(206));
+        expect(r.bodyAsString, equals('Contact'));
+
+        // Encoded, it's the same path:
+        var raw = await _rawGet(
+          httpd.boundPort!,
+          '/%2ewell-known/security.txt',
+        );
+        expect(raw.status, equals(200), reason: raw.raw);
+        expect(raw.raw, contains('Contact: mailto:a@b.com'));
+
+        // The same segments (the empty one is dropped):
+        raw = await _rawGet(httpd.boundPort!, '//.well-known/security.txt');
+        expect(raw.status, equals(200), reason: raw.raw);
+
+        // A directory without an index is not listed:
+        r = await get(httpd, '/.well-known/');
+        expect(r.status, equals(404));
+        r = await get(httpd, '/.well-known/acme-challenge/');
+        expect(r.status, equals(404));
+
+        // With an index (visible name) it's served:
+        File(p.join(docRoot.path, '.well-known', 'index.html'))
+            .writeAsStringSync('well-known index');
+        r = await get(httpd, '/.well-known');
+        expect(r.status, equals(301));
+        expect(r.header('location'), endsWith('/.well-known/'));
+        r = await get(httpd, '/.well-known/');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('well-known index'));
+      });
+
+      test('serveHiddenFiles: true serves them (previous behaviour)', () async {
+        var httpd = await startServer(serveHiddenFiles: true);
+
+        var r = await get(httpd, '/.env');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('KEY=$hiddenMark'));
+
+        r = await get(httpd, '/.git/config');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('[core] $hiddenMark'));
+
+        r = await get(httpd, '/sub/.secret');
+        expect(r.bodyAsString, equals('sub secret $hiddenMark'));
+
+        r = await get(httpd, '/.hidden/');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('hidden index $hiddenMark'));
+
+        r = await get(httpd, '/.hidden');
+        expect(r.status, equals(301));
+
+        r = await get(httpd, '/.well-known/.secret');
+        expect(r.bodyAsString, equals('well-known secret $hiddenMark'));
+
+        var raw = await _rawGet(httpd.boundPort!, '/%2Egit/config');
+        expect(raw.status, equals(200), reason: raw.raw);
+        expect(raw.raw, contains('[core] $hiddenMark'));
+
+        r = await get(httpd, '/.env', method: 'HEAD');
+        expect(r.status, equals(200));
+        expect(r.body, isEmpty);
+
+        r = await get(httpd, '/.env', headers: {'range': 'bytes=0-2'});
+        expect(r.status, equals(206));
+        expect(r.bodyAsString, equals('KEY'));
+
+        r = await get(httpd, '/.well-known/security.txt');
+        expect(r.status, equals(200));
+
+        // Still a 404 for a missing hidden file:
+        r = await get(httpd, '/.missing');
+        expect(r.status, equals(404));
+      });
+
+      group('symbolic links', () {
+        void link(String path, String target) =>
+            Link(p.joinAll([docRoot.path, ...path.split('/')]))
+                .createSync(p.joinAll([docRoot.path, ...target.split('/')]));
+
+        setUp(() {
+          link('env-link.txt', '.env');
+          link('git-link', '.git');
+          link('hidden-link', '.hidden');
+          link('sub/secret-link', 'sub/.secret');
+          link('security-link.txt', '.well-known/security.txt');
+          link('hello-link.txt', 'hello.txt');
+          link('sub-link', 'sub');
+          // A visible directory whose index is a link to a hidden file:
+          Directory(p.join(docRoot.path, 'tricky')).createSync();
+          link('tricky/index.html', '.hidden/index.html');
+          link('tricky/page.txt', '.hidden/x.txt');
+        });
+
+        for (var path in [
+          '/env-link.txt',
+          '/git-link/config',
+          '/git-link/',
+          '/git-link',
+          '/hidden-link/x.txt',
+          '/hidden-link/',
+          '/sub/secret-link',
+          '/tricky/',
+          '/tricky',
+          '/tricky/index.html',
+          '/tricky/page.txt',
+        ]) {
+          test('to a hidden entry, 404: $path', () async {
+            var httpd = await startServer();
+
+            var r = await _rawGet(httpd.boundPort!, path);
+            expect(r.status, equals(404), reason: r.raw);
+            expect(r.raw, isNot(contains(hiddenMark)));
+          });
+        }
+
+        test('to visible and /.well-known/ entries are served', () async {
+          var httpd = await startServer();
+
+          var r = await get(httpd, '/hello-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('Hello World!'));
+
+          r = await get(httpd, '/sub-link/');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('sub index'));
+
+          r = await get(httpd, '/security-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('Contact: mailto:a@b.com'));
+        });
+
+        test('serveHiddenFiles: true serves them', () async {
+          var httpd = await startServer(serveHiddenFiles: true);
+
+          var r = await get(httpd, '/env-link.txt');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('KEY=$hiddenMark'));
+
+          r = await get(httpd, '/tricky/');
+          expect(r.status, equals(200));
+          expect(r.bodyAsString, equals('hidden index $hiddenMark'));
+        });
+      }, skip: Platform.isWindows ? 'No symbolic links on Windows' : false);
+
+      test('a document root inside a hidden directory is served', () async {
+        var root = Directory(p.join(tempDir.path, '.site', 'www'))
+          ..createSync(recursive: true);
+        File(p.join(root.path, 'index.html')).writeAsStringSync('site index');
+        File(p.join(root.path, 'page.txt')).writeAsStringSync('site page');
+        File(p.join(root.path, '.env')).writeAsStringSync('KEY=$hiddenMark');
+
+        var httpd = PetitHTTPD(root, port: 0, bindingAddress: '127.0.0.1');
+        addTearDown(() => httpd.stop(force: true));
+        await httpd.start();
+
+        var r = await get(httpd, '/');
+        expect(r.status, equals(200));
+        expect(r.bodyAsString, equals('site index'));
+
+        r = await get(httpd, '/page.txt');
+        expect(r.bodyAsString, equals('site page'));
+
+        r = await get(httpd, '/.env');
+        expect(r.status, equals(404));
+      });
     });
 
     test('stop and start cycles', () async {
@@ -736,10 +1067,14 @@ class _RawResponse {
 }
 
 /// Sends a raw request, so that the [path] is not normalized by a client.
-Future<_RawResponse> _rawGet(int port, String path) async {
+Future<_RawResponse> _rawGet(
+  int port,
+  String path, {
+  String method = 'GET',
+}) async {
   var socket = await Socket.connect('127.0.0.1', port);
   socket.write(
-    'GET $path HTTP/1.1\r\n'
+    '$method $path HTTP/1.1\r\n'
     'Host: 127.0.0.1:$port\r\n'
     'Connection: close\r\n'
     '\r\n',

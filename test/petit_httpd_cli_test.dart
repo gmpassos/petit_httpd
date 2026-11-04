@@ -38,6 +38,43 @@ void main() {
       expect(httpd.domains, isEmpty);
       expect(httpd.letsEncryptDirectory?.path, equals('/etc/letsencrypt/live'));
       expect(httpd.isLetsEncryptEnabled, isFalse);
+      expect(httpd.serveHiddenFiles, isFalse);
+    });
+
+    test('-serve-hidden-files', () {
+      expect(
+        parse([tempDir.path, '-serve-hidden-files']).serveHiddenFiles,
+        isTrue,
+      );
+      // Flag keys are normalized, like the options:
+      expect(
+        parse([tempDir.path, '-serveHiddenFiles']).serveHiddenFiles,
+        isTrue,
+      );
+      expect(
+        parse(['-serve-hidden-files', tempDir.path]).documentRoot.path,
+        equals(tempDir.absolute.path),
+      );
+    });
+
+    test('`--serve-hidden-files` is rejected (would take a value)', () {
+      for (var args in [
+        ['--serve-hidden-files', tempDir.path],
+        [tempDir.path, '--serve-hidden-files'],
+        [tempDir.path, '--serve-hidden-files', 'true'],
+      ]) {
+        expect(
+          () => parse(args),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('`-serve-hidden-files` is a flag'),
+            ),
+          ),
+          reason: '$args',
+        );
+      }
     });
 
     test('all options', () {
@@ -59,8 +96,10 @@ void main() {
         'no-cache',
         '-cors',
         '-force-https',
+        '-serve-hidden-files',
       ]);
 
+      expect(httpd.serveHiddenFiles, isTrue);
       expect(httpd.port, equals(8080));
       expect(httpd.securePort, equals(8443));
       expect(httpd.bindingAddress, equals('0.0.0.0'));
@@ -144,6 +183,15 @@ void main() {
       expect(output.join('\n'), contains('Invalid `--port`: x'));
     });
 
+    test('`--serve-hidden-files` exits with 64', () async {
+      var (exitCode, output) = await run([
+        tempDir.path,
+        '--serve-hidden-files',
+      ]);
+      expect(exitCode, equals(64));
+      expect(output.join('\n'), contains('`-serve-hidden-files` is a flag'));
+    });
+
     test('missing document root', () async {
       var missing = p.join(tempDir.path, 'missing');
       var (exitCode, output) = await run([missing]);
@@ -174,6 +222,7 @@ void main() {
       var log = output.join('\n');
       expect(log, contains('-- Port: 0'));
       expect(log, contains('-- CORS: true'));
+      expect(log, contains('-- Serve hidden files: false'));
       expect(log, contains('-- Cache-Control: no-store'));
       expect(log, contains('-- STARTED: PetitHTTPD{'));
 
@@ -367,5 +416,104 @@ void main() {
       timeout: const Timeout(Duration(seconds: 90)),
       skip: Platform.isWindows ? 'Uses POSIX signals' : false,
     );
+
+    for (var serveHiddenFiles in [false, true]) {
+      test(
+        'hidden files (-serve-hidden-files: $serveHiddenFiles)',
+        () async {
+          File(p.join(tempDir.path, '.env')).writeAsStringSync('KEY=value');
+          var git = Directory(p.join(tempDir.path, '.git'))..createSync();
+          File(p.join(git.path, 'config')).writeAsStringSync('[core]');
+          var wellKnown = Directory(p.join(tempDir.path, '.well-known'))
+            ..createSync();
+          File(p.join(wellKnown.path, 'security.txt'))
+              .writeAsStringSync('Contact: mailto:a@b.com');
+
+          var socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+          var port = socket.port;
+          await socket.close();
+
+          var process = await Process.start(Platform.resolvedExecutable, [
+            'bin/petit_httpd.dart',
+            tempDir.path,
+            '--port',
+            '$port',
+            '--address',
+            '127.0.0.1',
+            if (serveHiddenFiles) '-serve-hidden-files',
+            '-verbose',
+          ]);
+          addTearDown(() => process.kill(ProcessSignal.sigkill));
+
+          var stdout = StringBuffer();
+          var started = Completer<void>();
+          process.stdout.transform(utf8.decoder).listen((s) {
+            stdout.write(s);
+            if (!started.isCompleted &&
+                stdout.toString().contains('-- STARTED:')) {
+              started.complete();
+            }
+          });
+          var stderr = StringBuffer();
+          process.stderr.transform(utf8.decoder).listen(stderr.write);
+          unawaited(
+            process.exitCode.then((c) {
+              if (!started.isCompleted) {
+                started.completeError(
+                  'Process exited ($c) before starting:\n$stdout\n$stderr',
+                );
+              }
+            }),
+          );
+
+          await started.future;
+          expect(
+            '$stdout',
+            contains('-- Serve hidden files: $serveHiddenFiles'),
+          );
+
+          var client = HttpClient();
+          addTearDown(() => client.close(force: true));
+
+          Future<(int, String)> get(String path) async {
+            var request = await client.get('127.0.0.1', port, path);
+            var response = await request.close();
+            var body = await response.transform(utf8.decoder).join();
+            return (response.statusCode, body);
+          }
+
+          var hidden = {
+            '/.env': 'KEY=value',
+            '/.git/config': '[core]',
+            '/%2Eenv': 'KEY=value',
+            '/%2egit/config': '[core]',
+          };
+
+          for (var e in hidden.entries) {
+            var (status, body) = await get(e.key);
+            if (serveHiddenFiles) {
+              expect(status, equals(200), reason: e.key);
+              expect(body, equals(e.value), reason: e.key);
+            } else {
+              expect(status, equals(404), reason: e.key);
+              expect(body, isNot(contains(e.value)), reason: e.key);
+            }
+          }
+
+          var (status, body) = await get('/.well-known/security.txt');
+          expect(status, equals(200));
+          expect(body, equals('Contact: mailto:a@b.com'));
+
+          (status, body) = await get('/hello.txt');
+          expect(status, equals(200));
+          expect(body, equals('Hello CLI!'));
+
+          expect(process.kill(), isTrue);
+          expect(await process.exitCode, isNot(equals(0)));
+        },
+        timeout: const Timeout(Duration(seconds: 90)),
+        skip: Platform.isWindows ? 'Uses POSIX signals' : false,
+      );
+    }
   });
 }

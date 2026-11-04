@@ -1,3 +1,21 @@
+## 1.3.0
+
+- **Security fix — default behaviour change: hidden files are no longer served.**
+  - Until `1.2.2` any file in the document root was served, including hidden ones such as `/.env` or `/.git/config`.
+  - Now a request with any path segment starting with `.` (file or directory, at any depth) gets a `404 Not Found`, the same response as a missing file (existence is not revealed). For example: `/.env`, `/.git/config`, `/sub/.secret`, `/.hidden/x.txt`, `/.hidden/` (its index document is not served either).
+  - The segments are checked after URL-decoding, as the file is resolved: `/%2eenv`, `/%2Egit/config`, and encoded separators (`/sub%2f.secret`, `/%5c.env`) are also blocked. Any method, `HEAD` and range requests included.
+  - The real path of the requested entry (and of a directory's `index.html`) is also checked, relative to the document root: a visible symbolic link to a hidden entry (`env-link -> .env`, `dir/index.html -> ../.hidden/x`) is blocked, as are names the file system maps to a hidden entry (such as Windows 8.3 short names). A document root inside a hidden directory is still served.
+  - Allowed: `/.well-known/` ([RFC 8615](https://www.rfc-editor.org/rfc/rfc8615)), for Let's Encrypt challenges, `security.txt` and others. Only as the first segment, case-sensitive; hidden entries inside it (`/.well-known/.secret`) are still blocked. See `PetitHTTPD.allowedHiddenDirectories`.
+  - **Opt-in to the previous behaviour**: `PetitHTTPD(..., serveHiddenFiles: true)`, or the CLI flag `-serve-hidden-files`.
+- `PetitHTTPD`:
+  - Added `serveHiddenFiles` (default: `false`), `allowedHiddenDirectories` and `isHiddenPath`.
+  - `toString` shows `serveHiddenFiles: true` when enabled.
+- CLI `petit_httpd`:
+  - New flag `-serve-hidden-files` (shown with `-verbose`). The double-dash form `--serve-hidden-files` is rejected (exit code `64`): as an option it would take the next argument (such as the document root) as its value.
+- `README.md`: the hidden files section and the `-serve-hidden-files` option.
+- Tests: hidden paths (plain, nested, `%2e`/`%2E`-encoded, encoded separators, trailing slash, query strings, dot segments, control characters, `HEAD`, range and conditional requests, any method) on the real server, symbolic links to hidden entries, `/.well-known/` served, `serveHiddenFiles: true`, path traversal with and without it, and the CLI flag on a real process.
+- path: ^1.9.1 (now a dependency, was a dev_dependency).
+
 ## 1.2.2
 
 - args_simple: ^1.2.1
