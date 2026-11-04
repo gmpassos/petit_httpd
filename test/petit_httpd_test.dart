@@ -27,8 +27,10 @@ void main() {
         expect(response.status, equals(404));
         expect(response.getResponseHeader('cache-control'), isNull);
 
-        expect(response.getResponseHeader('server'),
-            equals('petit_httpd/${PetitHTTPD.VERSION}'));
+        expect(
+          response.getResponseHeader('server'),
+          equals('petit_httpd/${PetitHTTPD.VERSION}'),
+        );
       }
 
       {
@@ -37,13 +39,17 @@ void main() {
 
         expect(response.isOK, isTrue);
         expect(response.status, equals(200));
-        expect(response.getResponseHeader('cache-control'),
-            contains('must-revalidate'));
+        expect(
+          response.getResponseHeader('cache-control'),
+          contains('must-revalidate'),
+        );
 
         expect(response.bodyAsString, equals('Hello World!'));
 
-        expect(response.getResponseHeader('server'),
-            equals('petit_httpd/${PetitHTTPD.VERSION}'));
+        expect(
+          response.getResponseHeader('server'),
+          equals('petit_httpd/${PetitHTTPD.VERSION}'),
+        );
       }
     });
   });
