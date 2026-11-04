@@ -7,7 +7,7 @@ import 'petit_httpd_base.dart';
 /// The `petit_httpd` CLI usage example.
 const String petitHTTPDUsage =
     '  \$> petit_httpd ./www --port 8080 --secure-port 443 --address 0.0.0.0 '
-    '--letsencrypt-path /etc/letsencrypt --domain domain.com '
+    '--letsencrypt-path /etc/letsencrypt/live --domain domain.com '
     '--email contact@domain.com --cache-control no-cache '
     '-cors -force-https -verbose';
 
