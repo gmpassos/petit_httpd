@@ -1,6 +1,6 @@
 name: petit_httpd
 description: A simple HTTP file server integrated with Let's Encrypt, gzip and CORS.
-version: 1.2.1
+version: 1.2.2
 homepage: https://github.com/gmpassos/petit_httpd
 
 environment:
@@ -10,7 +10,7 @@ executables:
   petit_httpd:
 
 dependencies:
-  args_simple: ^1.2.0
+  args_simple: ^1.2.1
   shelf: ^1.4.3
   shelf_static: ^1.2.0
   shelf_gzip: ^4.1.0
