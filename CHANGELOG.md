@@ -1,3 +1,9 @@
+## 1.2.2
+
+- args_simple: ^1.2.1
+  - Typed option accessors (e.g. `optionAsInt`) no longer throw a `TypeError` on an unparseable
+    value (such as `--port abc`); they return the default.
+
 ## 1.2.1
 
 - Tests (55 -> 88; no library changes):
