@@ -48,7 +48,7 @@ jobs:
           flags: unittests
           env_vars: OS,DART
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           verbose: true
       - name: dart pub publish --dry-run
         if: matrix.sdk == 'stable'

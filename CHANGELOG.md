@@ -1,3 +1,14 @@
+## 1.2.1
+
+- Tests (55 -> 88; no library changes):
+  - Let's Encrypt integration tests without network access: self-signed certificates installed in the Let's Encrypt directory, all connections routed to the loopback (any other host is refused). Covers HTTPS serving, the HTTP -> HTTPS redirect, multiple domains (one certificate each, via SNI), `redirectToHTTPS: false`, stop/restart of both servers, and a failed start releasing the ports.
+  - Server integration tests: range requests (`206`, suffix/open ranges, `416`), `HEAD` headers matching `GET`, a large binary file, concurrent requests, MIME types, URL-encoded file names (unicode, `%`, `+`), index files in nested directories, modified/deleted files, stop/start cycles and idle keep-alive connections closed on `stop`.
+  - CLI as a real process: usage, missing document root, serving files until killed.
+  - Pinned current behaviour (unchanged, to be reviewed): hidden files (`.env`, `.git/`) are served; any `Origin` is echoed with `Access-Control-Allow-Credentials: true`; the HTTPS redirect is a `303` without the `Server` header; any method (`POST`, `PUT`, `DELETE`, `OPTIONS`...) is answered as a read-only `GET`; unknown file types are sent as `text/plain`.
+  - Line coverage: 96.5% -> 99.4% (the only uncovered line is unreachable: `start` never returns `false`).
+- GitHub CI: the Codecov upload uses `CODECOV_TOKEN` and fails the build on error (`fail_ci_if_error: true`).
+- dev_dependencies: basic_utils: ^5.8.2 (test certificates).
+
 ## 1.2.0
 
 - `PetitHTTPD`:
