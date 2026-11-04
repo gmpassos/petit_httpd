@@ -139,7 +139,14 @@ Future<int?> runPetitHTTPD(
     }
   }
 
-  var ok = await petitHTTPD.start();
+  bool ok;
+  try {
+    ok = await petitHTTPD.start();
+  } catch (e) {
+    log('** ERROR Starting: $petitHTTPD');
+    log('** $e');
+    return 1;
+  }
 
   if (!ok) {
     log('** ERROR Starting: $petitHTTPD');

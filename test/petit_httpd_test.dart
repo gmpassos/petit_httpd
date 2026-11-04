@@ -13,6 +13,7 @@ void main() {
       expect(documentRoot.existsSync(), isTrue);
 
       var petitHTTPD = PetitHTTPD(documentRoot, port: 4455);
+      addTearDown(() => petitHTTPD.stop(force: true));
 
       var ok = await petitHTTPD.start();
       expect(ok, isTrue);
