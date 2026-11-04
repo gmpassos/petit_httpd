@@ -1,3 +1,0 @@
-dependency_overrides:
-  args_simple:
-    path: ../args_simple
