@@ -10,9 +10,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [ '3.13.0', stable ]
+
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
       - name: Dart version
         run: |
           dart --version
@@ -28,18 +35,21 @@ jobs:
       - name: Run tests (VM)
         run: dart test --platform vm
       - name: Generate coverage report
+        if: matrix.sdk == 'stable'
         run: |
           dart pub global activate coverage
-          dart run test --coverage=./coverage
+          dart test --platform vm --coverage=./coverage
           dart pub global run coverage:format_coverage --check-ignore --packages=.dart_tool/package_config.json --report-on=lib --lcov -o ./coverage/lcov.info -i ./coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v1
+        if: matrix.sdk == 'stable'
+        uses: codecov/codecov-action@v7
         with:
-          directory: ./coverage/
+          files: ./coverage/lcov.info
           flags: unittests
           env_vars: OS,DART
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
           verbose: true
       - name: dart pub publish --dry-run
+        if: matrix.sdk == 'stable'
         run: dart pub publish --dry-run
-

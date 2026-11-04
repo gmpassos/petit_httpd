@@ -1,4 +1,4 @@
 /// PetitHTTPD library.
-library petit_httpd;
+library;
 
 export 'src/petit_httpd_base.dart';

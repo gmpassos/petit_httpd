@@ -9,7 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 /// A Simple HTTP Daemon.
 class PetitHTTPD {
   // ignore: constant_identifier_names
-  static const String VERSION = '1.1.0';
+  static const String VERSION = '1.2.0';
 
   /// The document root [Directory].
   final Directory documentRoot;
@@ -33,7 +33,8 @@ class PetitHTTPD {
   /// If `true` CORS` headers will be set for successful responses.
   final bool setCORSHeaders;
 
-  /// If [true] and a [SecureServer] is being started
+  /// If `true` and the secure (HTTPS) server is being started, plain HTTP
+  /// requests for one of the [domains] are redirected to HTTPS.
   ///
   /// - See [isLetsEncryptEnabled].
   final bool redirectToHTTPS;
@@ -47,17 +48,19 @@ class PetitHTTPD {
   /// The Let's Encrypt [Directory]
   final Directory? letsEncryptDirectory;
 
-  PetitHTTPD(this.documentRoot,
-      {this.port = 80,
-      this.securePort = 443,
-      this.bindingAddress = 'localhost',
-      this.setHeaderCacheControl = true,
-      this.headerCacheControl,
-      this.setCORSHeaders = true,
-      this.redirectToHTTPS = true,
-      this.allowLetsEncrypt = true,
-      this.domains,
-      this.letsEncryptDirectory});
+  PetitHTTPD(
+    this.documentRoot, {
+    this.port = 80,
+    this.securePort = 443,
+    this.bindingAddress = 'localhost',
+    this.setHeaderCacheControl = true,
+    this.headerCacheControl,
+    this.setCORSHeaders = true,
+    this.redirectToHTTPS = true,
+    this.allowLetsEncrypt = true,
+    this.domains,
+    this.letsEncryptDirectory,
+  });
 
   /// Returns `true` if Let's Encrypt is enabled and all prerequisites are accomplished.
   bool get isLetsEncryptEnabled =>
@@ -66,8 +69,28 @@ class PetitHTTPD {
       domains != null &&
       domains!.isNotEmpty;
 
+  HttpServer? _server;
+  HttpServer? _secureServer;
+
+  /// Returns `true` if the daemon was started and not [stop]ped yet.
+  bool get isStarted => _server != null;
+
+  /// The actual port of the HTTP server, or `null` if not started.
+  ///
+  /// Useful when [port] is `0` (an ephemeral port chosen by the OS).
+  int? get boundPort => _server?.port;
+
+  /// The actual port of the HTTPS server, or `null` if it's not running.
+  int? get boundSecurePort => _secureServer?.port;
+
   /// Starts the daemon.
+  ///
+  /// Throws a [StateError] if it's already started.
   Future<bool> start() async {
+    if (isStarted) {
+      throw StateError('Already started: $this');
+    }
+
     if (isLetsEncryptEnabled) {
       return _startLetsEncrypt();
     } else {
@@ -75,12 +98,27 @@ class PetitHTTPD {
     }
   }
 
+  /// Stops the daemon, closing its servers.
+  /// If [force] is `true` active connections are closed immediately.
+  Future<void> stop({bool force = false}) async {
+    final server = _server;
+    final secureServer = _secureServer;
+    _server = null;
+    _secureServer = null;
+
+    await Future.wait([
+      if (server != null) server.close(force: force),
+      if (secureServer != null) secureServer.close(force: force),
+    ]);
+  }
+
   Future<bool> _startNormal() async {
-    var handler = _createShelfHandler();
+    var handler = createHandler();
 
     var server = await shelf_io.serve(handler, bindingAddress, port);
 
     _configureServer(server);
+    _server = server;
 
     return true;
   }
@@ -90,7 +128,11 @@ class PetitHTTPD {
     server.autoCompress = true;
   }
 
-  Handler _createShelfHandler({bool withSecureServer = false}) {
+  /// Creates the `shelf` [Handler] that serves the [documentRoot].
+  ///
+  /// - If [withSecureServer] is `true` and [redirectToHTTPS] is enabled,
+  ///   plain HTTP requests for one of the [domains] are redirected to HTTPS.
+  Handler createHandler({bool withSecureServer = false}) {
     var pipeline = const Pipeline().addMiddleware(logRequests());
 
     if (withSecureServer && redirectToHTTPS) {
@@ -102,7 +144,8 @@ class PetitHTTPD {
         .addMiddleware(_headersMiddleware);
 
     var handler = pipeline.addHandler(
-        createStaticHandler(documentRoot.path, defaultDocument: 'index.html'));
+      createStaticHandler(documentRoot.path, defaultDocument: 'index.html'),
+    );
 
     return handler;
   }
@@ -113,15 +156,25 @@ class PetitHTTPD {
 
       if (requestedUri.scheme == 'http') {
         final domains = this.domains;
-        if (domains != null && domains.containsKey(requestedUri.host)) {
-          var secureUri = requestedUri.replace(scheme: 'https');
-          return Response.seeOther(secureUri);
+        // `Uri.host` is always lower-case, and so are DNS names:
+        final host = requestedUri.host;
+        if (domains != null &&
+            domains.keys.any((d) => d.toLowerCase() == host)) {
+          return Response.seeOther(httpsRedirectUri(requestedUri));
         }
       }
 
       return innerHandler(request);
     };
   }
+
+  /// Returns the HTTPS version of [uri], pointing to [securePort].
+  ///
+  /// The port of [uri] is the HTTP [port], so it's never kept. The default
+  /// HTTPS port (`443`) is omitted from the returned [Uri]; path and query
+  /// are preserved as they are (already encoded).
+  Uri httpsRedirectUri(Uri uri) =>
+      uri.replace(scheme: 'https', port: securePort);
 
   Handler _headersMiddleware(Handler innerHandler) {
     return (request) {
@@ -130,8 +183,11 @@ class PetitHTTPD {
     };
   }
 
-  Response _configureHeaders(Request request, Response response,
-      {Map<String, String>? headers}) {
+  Response _configureHeaders(
+    Request request,
+    Response response, {
+    Map<String, String>? headers,
+  }) {
     headers ??= <String, String>{};
 
     headers[HttpHeaders.serverHeader] = 'petit_httpd/$VERSION';
@@ -144,8 +200,8 @@ class PetitHTTPD {
     if (setHeaderCacheControl) {
       var headerCacheControl = this.headerCacheControl?.trim();
 
-      var cacheControl = headerCacheControl != null &&
-              headerCacheControl.isNotEmpty
+      var cacheControl =
+          headerCacheControl != null && headerCacheControl.isNotEmpty
           ? headerCacheControl
           : 'private, must-revalidate, max-age=1, stale-while-revalidate=60';
 
@@ -172,8 +228,11 @@ class PetitHTTPD {
   static const String exposeHeaders =
       "Content-Length, Content-Type, Last-Modified, $headerXAccessToken, $headerXAccessTokenExpiration";
 
-  static Map<String, String> setHeadersCORS(Request request, Response response,
-      {Map<String, String>? headers}) {
+  static Map<String, String> setHeadersCORS(
+    Request request,
+    Response response, {
+    Map<String, String>? headers,
+  }) {
     headers ??= <String, String>{};
 
     var origin = getOrigin(request);
@@ -212,7 +271,13 @@ class PetitHTTPD {
   static String? getRemoteAddress(Request request) {
     final connectionInfo =
         request.context['shelf.io.connection_info'] as HttpConnectionInfo?;
-    return connectionInfo?.remoteAddress.address;
+    try {
+      return connectionInfo?.remoteAddress.address;
+    } on StateError {
+      // Since `shelf` 1.4.3 the connection info is resolved lazily,
+      // and throws a `StateError` if the connection is already gone.
+      return null;
+    }
   }
 
   static String? getOrigin(Request request) {
@@ -237,32 +302,36 @@ class PetitHTTPD {
   Future<bool> _startLetsEncrypt() async {
     final certificatesHandler = CertificatesHandlerIO(letsEncryptDirectory!);
 
-    final LetsEncrypt letsEncrypt =
-        LetsEncrypt(certificatesHandler, production: true);
-
-    var handler = _createShelfHandler(withSecureServer: true);
-
-    final domains = this.domains;
-
-    var domain = domains!.keys.first;
-    var domainEmail = domains[domain] ?? 'contact@$domain';
-
-    var servers = await letsEncrypt.startSecureServer(
-      handler,
-      {domain: domainEmail},
+    final letsEncrypt = LetsEncrypt(
+      certificatesHandler,
       port: port,
       securePort: securePort,
       bindingAddress: bindingAddress,
+      production: true,
     );
 
-    var server = servers[0]; // HTTP Server.
-    var serverSecure = servers[1]; // HTTPS Server.
+    var handler = createHandler(withSecureServer: true);
 
-    _configureServer(server);
-    _configureServer(serverSecure);
+    var servers = await letsEncrypt.startServer(handler, letsEncryptDomains);
+
+    _configureServer(servers.http);
+    _configureServer(servers.https);
+
+    _server = servers.http;
+    _secureServer = servers.https;
 
     return true;
   }
+
+  /// The [domains] as Let's Encrypt [Domain]s.
+  /// A domain without an e-mail uses `contact@<domain>`.
+  List<Domain> get letsEncryptDomains => [
+    for (var e in (domains ?? const <String, String>{}).entries)
+      Domain(
+        name: e.key,
+        email: e.value.trim().isNotEmpty ? e.value.trim() : 'contact@${e.key}',
+      ),
+  ];
 
   @override
   String toString() {

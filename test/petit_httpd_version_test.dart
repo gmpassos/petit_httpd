@@ -1,14 +1,15 @@
 @TestOn('vm')
+library;
+
 import 'dart:io';
 
 import 'package:path/path.dart' as path;
-import 'package:pubspec/pubspec.dart';
+import 'package:petit_httpd/petit_httpd.dart';
+import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('PetitHTTPD.VERSION', () {
-    setUp(() {});
-
     test('Check Version', () async {
       var projectDirectory = Directory.current;
 
@@ -18,13 +19,18 @@ void main() {
 
       print('pubspecFile: $pubspecFile');
 
-      var pubSpec = await PubSpec.loadFile(pubspecFile.path);
+      var pubSpec = Pubspec.parse(
+        pubspecFile.readAsStringSync(),
+        sourceUrl: pubspecFile.uri,
+      );
 
       print('PubSpec.name: ${pubSpec.name}');
       print('PubSpec.version: ${pubSpec.version}');
 
-      var srcPath =
-          path.join(projectDirectory.path, 'lib/src/petit_httpd_base.dart');
+      var srcPath = path.join(
+        projectDirectory.path,
+        'lib/src/petit_httpd_base.dart',
+      );
 
       var srcFile = File(srcPath);
 
@@ -38,9 +44,14 @@ void main() {
 
       print('srcVersion: $srcVersion');
 
-      expect(pubSpec.version.toString(), equals(srcVersion),
-          reason:
-              'Bones_API.VERSION[$srcVersion] != PubSpec.version[${pubSpec.version}]');
+      expect(
+        pubSpec.version.toString(),
+        equals(srcVersion),
+        reason:
+            'PetitHTTPD.VERSION[$srcVersion] != PubSpec.version[${pubSpec.version}]',
+      );
+
+      expect(PetitHTTPD.VERSION, equals(pubSpec.version.toString()));
     });
   });
 }

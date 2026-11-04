@@ -72,8 +72,21 @@ $> dart pub global activate petit_httpd
 To run an HTTP Daemon:
 
 ```shell
-$> petit_httpd ./www --port 8080 --securePort 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt/live --domain mydomain.com
+$> petit_httpd ./www --port 8080 --secure-port 443 --address 0.0.0.0 --letsencrypt-path /etc/letsencrypt/live --domain mydomain.com
 ```
+
+Options:
+
+- `--port`: the HTTP port (default: `80`).
+- `--secure-port`: the HTTPS port (default: `443`).
+- `--address`: the binding address (default: `localhost`).
+- `--domain` and `--email`: the domain for Let's Encrypt, and its contact e-mail (default: `contact@<domain>`).
+- `--letsencrypt-path`: the Let's Encrypt certificates directory (default: `/etc/letsencrypt/live`).
+- `--cache-control`: the `Cache-Control` header for successful responses.
+- `-cors`: sets the CORS headers.
+- `-force-https`: redirects HTTP requests of the domain to HTTPS.
+- `-verbose`: shows the configuration at startup.
+- `-version`: shows the version and exits.
 
 A BASH script with all together:
 ```shell
