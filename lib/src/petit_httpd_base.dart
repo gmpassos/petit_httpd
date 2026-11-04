@@ -156,7 +156,10 @@ class PetitHTTPD {
 
       if (requestedUri.scheme == 'http') {
         final domains = this.domains;
-        if (domains != null && domains.containsKey(requestedUri.host)) {
+        // `Uri.host` is always lower-case, and so are DNS names:
+        final host = requestedUri.host;
+        if (domains != null &&
+            domains.keys.any((d) => d.toLowerCase() == host)) {
           return Response.seeOther(httpsRedirectUri(requestedUri));
         }
       }
@@ -167,16 +170,11 @@ class PetitHTTPD {
 
   /// Returns the HTTPS version of [uri], pointing to [securePort].
   ///
-  /// The port of [uri] is the HTTP [port], so it's never kept: the default
-  /// HTTPS port (`443`) is omitted from the returned [Uri].
-  Uri httpsRedirectUri(Uri uri) => Uri(
-    scheme: 'https',
-    userInfo: uri.userInfo.isNotEmpty ? uri.userInfo : null,
-    host: uri.host,
-    port: securePort == 443 ? null : securePort,
-    path: uri.path,
-    query: uri.hasQuery ? uri.query : null,
-  );
+  /// The port of [uri] is the HTTP [port], so it's never kept. The default
+  /// HTTPS port (`443`) is omitted from the returned [Uri]; path and query
+  /// are preserved as they are (already encoded).
+  Uri httpsRedirectUri(Uri uri) =>
+      uri.replace(scheme: 'https', port: securePort);
 
   Handler _headersMiddleware(Handler innerHandler) {
     return (request) {
